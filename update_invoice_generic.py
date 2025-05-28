@@ -5,7 +5,7 @@ import requests
 from requests_oauthlib import OAuth2Session
 
 # ─── CONFIG ────────────────────────────────────────────────────
-USE_SANDBOX   = True
+USE_SANDBOX   = False
 API_BASE      = ("https://sandbox-quickbooks.api.intuit.com"
                  if USE_SANDBOX else
                  "https://quickbooks.api.intuit.com")
