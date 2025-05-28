@@ -31,8 +31,6 @@ def connect():
         client_secret=CLIENT_SECRET,
         authorization_response=request.url
     )
-    # For debugging, temporarily return the token directly
-    return jsonify(token)
     
     # Persist to disk for update_invoice_generic to pick up
     open("qbo_token.json","w").write(json.dumps(token))
@@ -58,3 +56,12 @@ def index():
 if __name__=="__main__":
     # Local debug
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=True)
+
+@app.route("/privacy")
+def privacy():
+    return open("privacy.html").read()
+
+@app.route("/terms")
+def terms():
+    return open("terms.html").read()
+
