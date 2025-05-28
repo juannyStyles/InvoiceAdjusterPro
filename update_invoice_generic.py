@@ -4,7 +4,7 @@ from datetime import date, datetime
 import requests
 from requests_oauthlib import OAuth2Session
 
-# ─── CONFIG ─────────────────────────────────────────────────
+# ─── CONFIG ────────────────────────────────────────────────────
 USE_SANDBOX   = True
 API_BASE      = ("https://sandbox-quickbooks.api.intuit.com"
                  if USE_SANDBOX else
@@ -19,7 +19,7 @@ REFRESH_TOKEN = os.getenv("QBO_REFRESH_TOKEN")
 REALM_ID      = os.getenv("QBO_REALM_ID")
 TOKEN_URL     = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
-# ─── AUTH ────────────────────────────────────────────────────
+# ─── AUTH ──────────────────────────────────────────────────────
 def load_token():
     if os.path.isfile(TOKEN_FILE):
         return json.load(open(TOKEN_FILE))
@@ -43,7 +43,7 @@ def get_session():
         sess.refresh_token(TOKEN_URL, **extra)
     return sess
 
-# ─── QBO HELPERS ─────────────────────────────────────────────
+# ─── QBO HELPERS ───────────────────────────────────────────────
 def find_invoice_id(sess, docnum):
     sql = f"select Id,SyncToken from Invoice where DocNumber='{docnum}'"
     r   = sess.get(f"{API_BASE}/v3/company/{REALM_ID}/query",
@@ -62,7 +62,6 @@ def download_pdf(sess, inv_id, dest):
     open(dest,"wb").write(r.content)
 
 def get_invoice(sess, inv_id):
-    # minorversion=75 guarantees any existing custom‐field slots come back
     r = sess.get(
         f"{API_BASE}/v3/company/{REALM_ID}/invoice/{inv_id}",
         params={"minorversion":MINOR_VERSION},
@@ -86,19 +85,16 @@ def get_custom_defs(sess):
             m = re.search(r"(\d+)$", nameKey)
             if not m: continue
             out[display] = {"DefinitionId":m.group(1),"Type":cf.get("Type")}
-    # dump for your inspection
+    # for debug
     open(os.path.join(SCRIPT_DIR,"last_defs.json"),"w").write(json.dumps(out,indent=2))
     print("[DEBUG] defs → last_defs.json",file=sys.stderr)
     return out
 
-# ─── SPARSE UPDATE ────────────────────────────────────────────
+# ─── SPARSE UPDATE ─────────────────────────────────────────────
 def sparse_update(sess, inv_id, sync, updates, customs):
     inv         = get_invoice(sess,inv_id)
-    existing_cf = inv.get("CustomField",[])
-    cf_map      = {cf["Name"]:cf for cf in existing_cf}
     defs        = get_custom_defs(sess)
 
-    # build a fresh array only for the fields you passed
     cf_payload=[]
     for name,val in customs.items():
         d = defs.get(name)
@@ -115,7 +111,6 @@ def sparse_update(sess, inv_id, sync, updates, customs):
             entry["NumberValue"]=val
         cf_payload.append(entry)
 
-    # now build the *raw* object QBO expects for update
     inv_body = {
         "Id":        inv_id,
         "SyncToken": sync,
@@ -125,59 +120,56 @@ def sparse_update(sess, inv_id, sync, updates, customs):
     if cf_payload:
         inv_body["CustomField"] = cf_payload
 
-    # **IMPORTANT**: payload must be the invoice *body itself*, no outer wrapper!
-    payload = inv_body
-
-    open(os.path.join(SCRIPT_DIR,"last_payload.json"),"w").write(json.dumps(payload,indent=2))
+    open(os.path.join(SCRIPT_DIR,"last_payload.json"),"w").write(json.dumps(inv_body,indent=2))
     print("[DEBUG] payload → last_payload.json",file=sys.stderr)
 
-    url = (
-        f"{API_BASE}/v3/company/{REALM_ID}"
-        f"/invoice?operation=update&minorversion={MINOR_VERSION}"
-    )
-    r = sess.post(
-        url,
-        json=payload,
-        headers={
-            "Content-Type":    "application/json",
-            "Accept":          "application/json",
-            "Accept-Encoding": "identity"       # also avoid gzip headaches
-        }
-    )
+    url = (f"{API_BASE}/v3/company/{REALM_ID}"
+           f"/invoice?operation=update&minorversion={MINOR_VERSION}")
+    r = sess.post(url, json=inv_body,
+                  headers={"Content-Type":"application/json",
+                           "Accept":"application/json",
+                           "Accept-Encoding":"identity"})
     if not r.ok:
         print(f"[DEBUG] QBO {r.status_code}: {r.text}", file=sys.stderr)
     r.raise_for_status()
 
-# ─── MAIN ─────────────────────────────────────────────────────
-def main(cfg_path):
-    cfg       = json.load(open(cfg_path))
-    doc       = cfg["DocNumber"]
-    updates   = cfg.get("Updates",{})
-    customs   = cfg.get("CustomFields",{})
-    save_dir  = cfg.get("SaveDir","")
+# ─── PUBLIC API ────────────────────────────────────────────────
+def main(cfg: dict) -> dict:
+    """
+    cfg = {
+      "DocNumber": "...",
+      "Updates": { "TxnDate":"YYYY-MM-DD", ... },
+      "CustomFields": { "Foo":"val", ... },
+      "SaveDir": "/some/path"           # optional
+    }
+    """
+    doc     = cfg["DocNumber"]
+    updates = cfg.get("Updates",{})
+    customs = cfg.get("CustomFields",{})
+    save_dir= cfg.get("SaveDir","")
 
-    sess      = get_session()
+    sess     = get_session()
     inv_id,sync = find_invoice_id(sess,doc)
 
     if save_dir:
         inv = get_invoice(sess,inv_id)
         old = datetime.strptime(inv["TxnDate"],"%Y-%m-%d").date()
-        fn  = f"{doc} - {old.strftime('%m.%d.%Y')} - Moved on {date.today().strftime('%m.%d.%Y')}.pdf"
+        fn  = f"{doc} - {old} - moved_{date.today()}.pdf"
         os.makedirs(save_dir,exist_ok=True)
         download_pdf(sess,inv_id,os.path.join(save_dir,fn))
 
-    print(f"[DEBUG] Updates: {updates}",file=sys.stderr)
-    print(f"[DEBUG] CustomFields: {customs}",file=sys.stderr)
-
     sparse_update(sess,inv_id,sync,updates,customs)
-    print(f"OK|{doc}")
+    return {"status":"ok","doc":doc}
 
+# ─── CLI ENTRYPOINT ────────────────────────────────────────────
 if __name__=="__main__":
     try:
         if len(sys.argv)!=2:
             raise RuntimeError("Usage: update_invoice_generic.py <config.json>")
-        main(sys.argv[1])
+        cfg = json.load(open(sys.argv[1]))
+        out = main(cfg)
+        print(json.dumps(out))
     except Exception as e:
-        cfgf=sys.argv[1] if len(sys.argv)>1 else "?"
-        print(f"ERROR|{cfgf}: {e}")
+        print(json.dumps({"status":"error","error":str(e)}))
         sys.exit(1)
+
