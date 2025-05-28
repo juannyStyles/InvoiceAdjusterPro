@@ -31,6 +31,9 @@ def connect():
         client_secret=CLIENT_SECRET,
         authorization_response=request.url
     )
+    # For debugging, temporarily return the token directly
+    return jsonify(token)
+    
     # Persist to disk for update_invoice_generic to pick up
     open("qbo_token.json","w").write(json.dumps(token))
     return "✅ Connected to QuickBooks!"
