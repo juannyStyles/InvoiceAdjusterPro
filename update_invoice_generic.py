@@ -85,7 +85,6 @@ def get_custom_defs(sess):
             m = re.search(r"(\d+)$", nameKey)
             if not m: continue
             out[display] = {"DefinitionId":m.group(1),"Type":cf.get("Type")}
-    # for debug
     open(os.path.join(SCRIPT_DIR,"last_defs.json"),"w").write(json.dumps(out,indent=2))
     print("[DEBUG] defs → last_defs.json",file=sys.stderr)
     return out
@@ -135,20 +134,12 @@ def sparse_update(sess, inv_id, sync, updates, customs):
 
 # ─── PUBLIC API ────────────────────────────────────────────────
 def main(cfg: dict) -> dict:
-    """
-    cfg = {
-      "DocNumber": "...",
-      "Updates": { "TxnDate":"YYYY-MM-DD", ... },
-      "CustomFields": { "Foo":"val", ... },
-      "SaveDir": "/some/path"           # optional
-    }
-    """
     doc     = cfg["DocNumber"]
     updates = cfg.get("Updates",{})
     customs = cfg.get("CustomFields",{})
     save_dir= cfg.get("SaveDir","")
 
-    sess     = get_session()
+    sess      = get_session()
     inv_id,sync = find_invoice_id(sess,doc)
 
     if save_dir:
